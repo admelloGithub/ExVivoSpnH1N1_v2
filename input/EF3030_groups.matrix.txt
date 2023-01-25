@@ -1,0 +1,9 @@
+Sample	batch	condition	color	pch
+B6	20200130	EF3030	seagreen4	16
+B7	20200130	EF3030	seagreen4	16
+HB1	20191114	Host+EF3030	dodgerblue4	15
+HB3	20200130	Host+EF3030	dodgerblue4	15
+HB4	20200130	Host+EF3030	dodgerblue4	15
+HIB1	20191114	Host+EF3030+pH1N1	firebrick4	17
+HIB3	20200130	Host+EF3030+pH1N1	firebrick4	17
+HIB4	20200130	Host+EF3030+pH1N1	firebrick4	17

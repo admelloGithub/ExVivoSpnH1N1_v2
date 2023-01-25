@@ -1,0 +1,1244 @@
+---
+title: "Untitled"
+author: "Adonis D'mello"
+output: PDFs/SVG/Txt files
+---
+
+
+#Packages
+
+```{r}
+library(cowplot)
+library(dendextend)
+library(edgeR)
+library(FactoMineR)
+library(ggdendro)
+library(ggplot2)
+library(gplots)
+library(gtools)
+library(pvclust)
+library(reshape)
+library(vegan)
+library(WGCNA)
+library(ggfortify)
+library(ggrepel)
+library(GGally)
+library(DESeq2)
+library(pathview)
+library(reshape2)
+library(UpSetR)
+library(biomaRt)
+library(tidyr)
+library(factoextra)
+library(png)
+library(grid)
+library(gridExtra)
+library(ggpubr)
+library(sva)
+library(KEGGREST)
+library(KEGGprofile)
+library(ape)
+library(rrcov)
+library(magrittr)
+library(DOSE)
+library(biomaRt)
+library(clusterProfiler)
+library(ReactomePA)
+library(ggnewscale)
+library(enrichplot)
+library(httr)
+library(ggvenn)
+library(pzfx)
+```
+
+#Functions
+```{r}
+get_heatmap_separators <- function(vector){
+  sep <- c()
+  for(i in 2:length(unique(vector))){
+    sep[length(sep) + 1] <- min(which(vector == unique(vector)[i])) - 1
+  }
+  return(sep)
+}
+merge.all <- function(x, ..., by = "row.names") {
+  L <- list(...)
+  for (i in seq_along(L)) {
+    x <- merge(x, L[[i]], by = by, all=TRUE)
+    rownames(x) <- x$Row.names
+    x$Row.names <- NULL
+  }
+  return(x)
+}
+add_kegg_seperators <- function(z_norm_exp_matrix,groups) {
+    
+    order <- c(colnames(z_norm_exp_matrix))
+    ct <- 0
+    
+    for (j in 1:length(groups)) {
+    if (j == length(groups) ) {
+      next
+    }
+    if (groups[j]==groups[j+1]) {
+        next
+    } else if (groups[j]!=groups[j+1]) {
+      order <- append(order,"Sep",after = j+ct)
+      ct <- ct+1
+        }
+    }
+    
+    for (i in 1:ct) {
+    z_norm_exp_matrix <- cbind(z_norm_exp_matrix, Sep=NA)
+    }
+    z_norm_exp_matrix <- z_norm_exp_matrix[,order]
+    return(z_norm_exp_matrix)
+}
+get_dendro_structure <- function(result){
+  structure <- hang.dendrogram(as.dendrogram(result$hclust))
+  structure <- capture.output(str(structure))
+  structure <- structure[grepl("leaf", structure)]
+  structure <- as.numeric(as.character(substr(structure, regexpr("h=", structure ) + 3, regexpr("  )", structure))))
+  return(structure)
+}
+get_dendro_data <- function(result){
+  dendro.data <- dendro_data(result$hclust)
+  dendro.data <- dendro.data$segments[which(dendro.data$segments$y == dendro.data$segments$yend),]
+  for(i in 1:nrow(dendro.data)){
+    dendro.data$minx[i] <- min(c(dendro.data$x[i], dendro.data$xend[i]))
+  }
+  dendro.data <- dendro.data[order(as.numeric(as.character(dendro.data$y)), as.numeric(as.character(dendro.data$minx))),]
+  return(dendro.data)
+}
+get_dendro_bootstraps <- function(dendro_data){
+  bootstrap.positions <- as.data.frame(matrix(nrow = length(dendro_data$y[duplicated(dendro_data$y)]),
+                                              ncol = 2))
+  for(i in 1:length(dendro_data$y[duplicated(dendro_data$y)])){
+    dendro_data.subset <- dendro_data[which(dendro_data$y == dendro_data$y[duplicated(dendro_data$y)][i]),]
+    bootstrap.positions[i,1] <- unique(dendro_data.subset$x)
+    bootstrap.positions[i,2] <- unique(dendro_data.subset$y)
+  }
+  return(bootstrap.positions)
+}
+query_upset <- function(set, queries) {
+      if (length(queries) ==1) {
+      intersect <- set[,queries,drop = F]
+      intersect$tmp = 0
+      intersect <- intersect[rowSums(intersect)==1,]
+    } else {
+      intersect <- set[,queries]
+      intersect <- intersect[rowSums(intersect) == length(queries),]
+    }
+  tmp <- set[rownames(intersect),]
+  tmp <- tmp[rowSums(tmp) == length(queries),]
+  return(tmp)
+}
+PlotPCA3DScoreImg <- function(mSetObj=NA, imgName, format="png", dpi=72, width=NA, inx1, inx2, inx3, angl){
+  
+  mSetObj <- .get.mSet(mSetObj);
+  
+  xlabel = paste("PC",inx1, "(", round(100*mSetObj$analSet$pca$variance[inx1],1), "%)");
+  ylabel = paste("PC",inx2, "(", round(100*mSetObj$analSet$pca$variance[inx2],1), "%)");
+  zlabel = paste("PC",inx3, "(", round(100*mSetObj$analSet$pca$variance[inx3],1), "%)");
+  
+  imgName = paste(imgName, "dpi", dpi, ".", format, sep="");
+  
+  if(is.na(width)){
+    w <- 9;
+  }else if(width == 0){
+    w <- 7.2;
+  }else{
+    w <- width;
+  }
+  h <- w;
+  
+  mSetObj$imgSet$pca.score3d <- imgName;
+  
+  Cairo::Cairo(file = imgName, unit="in", dpi=dpi, width=w, height=h, type=format, bg="white");
+  pchs <- as.numeric(mSetObj$dataSet$cls)+1;
+  uniq.pchs <- unique(pchs);
+  
+  if(mSetObj$dataSet$cls.type == "disc"){
+    cols <- GetColorSchema(mSetObj);
+    legend.nm <- unique(as.character(mSetObj$dataSet$cls));
+    uniq.cols <- unique(cols);
+    Plot3D(mSetObj$analSet$pca$x[, inx1], mSetObj$analSet$pca$x[, inx2], mSetObj$analSet$pca$x[, inx3], xlab= xlabel, ylab=ylabel,
+           zlab=zlabel, angle =angl, color=cols, pch=pchs, box=F);
+    legend("topleft", legend =legend.nm, pch=uniq.pchs, col=uniq.cols);
+    dev.off();
+    
+    if(!.on.public.web){
+      # 3D View using plotly
+      if(length(uniq.pchs) > 3){
+        col <- RColorBrewer::brewer.pal(length(uniq.pchs), "Set3")
+      }else{
+        col <- c("#1972A4", "#FF7070")
+      }
+      
+      p <- plotly::plot_ly(x = mSetObj$analSet$pca$x[, inx1], y = mSetObj$analSet$pca$x[, inx2], z = mSetObj$analSet$pca$x[, inx3],
+                 color = mSetObj$dataSet$cls, colors = col) 
+      p <- plotly::add_markers(p, sizes = 5)
+      p <- plotly::layout(p, scene = list(xaxis = list(title = xlabel),
+                          yaxis = list(title = ylabel),
+                          zaxis = list(title = zlabel)))
+      mSetObj$imgSet$pca.3d <- p;
+      print("The Interactive 3D PCA plot has been created, please find it in mSet$imgSet$pca.3d.")
+    }
+    
+  }else{
+    
+    Plot3D(mSetObj$analSet$pca$x[, inx1], mSetObj$analSet$pca$x[, inx2], mSetObj$analSet$pca$x[, inx3], xlab= xlabel, ylab=ylabel,
+           zlab=zlabel, angle =angl, pch=pchs, box=F);
+    dev.off();
+    
+    if(!.on.public.web){
+      # 3D View using plotly
+      col <- c("#C61951", "#1972A4")
+      p <- plotly::plot_ly(x = mSetObj$analSet$pca$x[, inx1], y = mSetObj$analSet$pca$x[, inx2], z = mSetObj$analSet$pca$x[, inx3],
+                           color = pchs, colors = col, marker = list(colorbar = list(len = 1, tickmode = array, tickvals = range(unique(pchs)),
+                                                                                     ticktext = levels(mSetObj$dataSet$cls)))); 
+      p <- plotly::add_markers(p, sizes = 1000);
+      p <- plotly::layout(p, scene = list(xaxis = list(title = xlabel),
+                                          yaxis = list(title = ylabel),
+                                          zaxis = list(title = zlabel)));
+      mSetObj$imgSet$pca.3d <- p;
+      print("The Interactive 3D PCA plot has been created, please find it in mSet$imgSet$pca.3d.")
+    }
+  }
+  return(.set.mSet(mSetObj));
+}
+.on.public.web <- FALSE;
+.set.mSet <- function(mSetObj=NA){
+  if(.on.public.web){
+    mSet <<- mSetObj;
+    return (1);
+  }
+  return(mSetObj);
+}
+.get.mSet <- function(mSetObj=NA){
+  if(.on.public.web){
+    return(mSet)
+  }else{
+    return(mSetObj);
+  }
+}
+
+find_soft_power <- function(sft){
+  df <- as.data.frame(cbind(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2]))
+  y <- -sign(sft$fitIndices[,3])*sft$fitIndices[,2]
+  dy <- diff(y) 
+  softpower <- which(abs(diff(y)) < 0.05)[1]
+  return(softpower)
+}
+
+eigengene_refit <- function(tpm.de, mergedMEs){
+  tpm.de.wgcna <- tpm.de
+  tpm.de.wgcna$invert <- T
+  for(i in 1:nrow(tpm.de)){
+    max <- 0
+    for(j in 1:ncol(mergedMEs)){
+      cor <- abs(cor(t(tpm.de[i,]), mergedMEs[,j], method = "pearson"))
+      if(cor > max){
+        max <- cor
+        tpm.de.wgcna$module[i] <- colnames(mergedMEs)[j]
+      }
+    }
+    if(cor(t(tpm.de[i,]), mergedMEs[,which(colnames(mergedMEs) == tpm.de.wgcna$module[i])], method = "pearson") > 0){
+      tpm.de.wgcna$invert[i] <- F
+    }
+  }
+  tpm.de.wgcna$module <- gsub("^ME","",tpm.de.wgcna$module)
+  return(tpm.de.wgcna)
+}
+
+eigengene_invert_id <- function(tpm.de.wgcna, mergedColors, mergedMEs){
+  tpm.de.wgcna$invert <- T
+  tpm.de.wgcna$module <- mergedColors
+  for(i in 1:nrow(tpm.de.wgcna)){
+    if(cor(t(tpm.de[i,]), mergedMEs[,which(colnames(mergedMEs) == paste0("ME",tpm.de.wgcna$module[i]))], method = "pearson") > 0){
+      tpm.de.wgcna$invert[i] <- F
+    }
+  }
+  return(tpm.de.wgcna)
+}
+
+wgcna_heatmap_reorder <- function(tpm.de.wgcna){
+  clusters <- as.data.frame(table(tpm.de.wgcna$module))
+  clusters <- clusters[order(-clusters[,2]),1]
+  
+  tpm.de.wgcna.reordered <- as.data.frame(matrix(nrow = 0,
+                                                 ncol = ncol(tpm.de.wgcna)))
+  for(i in 1:length(clusters)){
+    tpm.de.wgcna.reordered <- as.data.frame(rbind(tpm.de.wgcna.reordered,
+                                                  tpm.de.wgcna[tpm.de.wgcna$module == clusters[i] & tpm.de.wgcna$invert == F,],
+                                                  tpm.de.wgcna[tpm.de.wgcna$module == clusters[i] & tpm.de.wgcna$invert == T,]))
+  }
+  return(tpm.de.wgcna.reordered)
+}
+
+summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE,
+                      conf.interval=.95, .drop=TRUE) {
+    library(plyr)
+
+    # New version of length which can handle NA's: if na.rm==T, don't count them
+    length2 <- function (x, na.rm=FALSE) {
+        if (na.rm) sum(!is.na(x))
+        else       length(x)
+    }
+
+    # This does the summary. For each group's data frame, return a vector with
+    # N, mean, and sd
+    datac <- ddply(data, groupvars, .drop=.drop,
+      .fun = function(xx, col) {
+        c(N    = length2(xx[[col]], na.rm=na.rm),
+          mean = mean   (xx[[col]], na.rm=na.rm),
+          sd   = sd     (xx[[col]], na.rm=na.rm)
+        )
+      },
+      measurevar
+    )
+
+    # Rename the "mean" column    
+    datac <- rename(datac, c("mean" = measurevar))
+
+    datac$se <- datac$sd / sqrt(datac$N)  # Calculate standard error of the mean
+
+    # Confidence interval multiplier for standard error
+    # Calculate t-statistic for confidence interval: 
+    # e.g., if conf.interval is .95, use .975 (above/below), and use df=N-1
+    ciMult <- qt(conf.interval/2 + .5, datac$N-1)
+    datac$ci <- datac$se * ciMult
+
+    return(datac)
+}
+
+venn_font <- function(p, font)
+{
+
+  grep_grob <- function(gt, lab){
+    which(sapply(gt, function(x) grepl(lab, x$name)))
+  }
+  
+  p2 <- ggplot_gtable(ggplot_build(p))
+  mygrobs <- p2$grobs
+  panel_grob <- mygrobs[[grep_grob(mygrobs, "panel")]]
+  venn_grob <- panel_grob$children[[grep_grob(panel_grob$children, "venn")]]
+  text_grob <- venn_grob$children[grep_grob(venn_grob$children, "text")]
+  text_grob <- do.call(grid::gList, 
+                       lapply(text_grob, 
+                              function(x) {x$gp$fontfamily <- font; 
+                                           x}))
+  venn_grob$children[grep_grob(venn_grob$children, "text")] <- text_grob
+  panel_grob$children[[grep_grob(panel_grob$children, "venn")]] <- venn_grob
+  mygrobs[[grep_grob(mygrobs, "panel")]] <- panel_grob
+  p2$grobs <- mygrobs
+  grid::grid.newpage()
+  grid::grid.draw(p2)
+  
+}
+
+```
+
+#Directories
+```{r}
+set.seed(69)
+input_dir <- "/Users/admello/OneDrive - University of Maryland School of Medicine/Desktop/PTSTP/paper_codetest/input/"
+output_dir <- "/Users/admello/OneDrive - University of Maryland School of Medicine/Desktop/PTSTP/paper_codetest/output//"
+source(paste0(input_dir,"/heatmap.2.fix.R"))
+source(paste0(input_dir,"/utilities_edit.R"))
+source("/Users/admello/OneDrive - University of Maryland School of Medicine/Documents/heatmap.2.fix.R")
+source("/Users/admello/OneDrive - University of Maryland School of Medicine/Documents/R/R-4.1.3/library/KEGGREST-master/R/utilities_edit.R")
+R.utils::setOption("clusterProfiler.download.method","auto")
+```
+
+#Figure 2 Panels + Supplemental Figure 1 panels
+
+```{r}
+counts.path <- paste0(input_dir,"/EF3030_counts.matrix") 
+groups.path <- paste0(input_dir,"/EF3030_groups.matrix.txt") 
+kegg.map <- paste0(input_dir,"/Keggltmap")
+gff.file <- paste0(input_dir,"/EF3030.gbk.gff")
+
+comparisons <- c("Host+EF3030+pH1N1_vs_EF3030","Host+EF3030_vs_EF3030","Host+EF3030+pH1N1_vs_Host+EF3030")
+counts <- read.delim(counts.path, header = T, row.names = 1)
+design <- read.delim(groups.path, header = T)
+if (gff.file != "") {
+gff <- read.gff(gff.file, na.strings = c(".", "?"), GFF3 = TRUE)
+gff <- gff[gff$type == "CDS",]
+anno <- gff[grep(".p01",unique(gff$attributes)),]
+rownames(anno) <- gsub("ID=","",gsub(";.*$","",anno$attributes))
+anno$attributes <- gsub(" ","_",gsub(";.*$","",gsub("^.*;product=","",anno$attributes))) 
+anno <- anno[,c("attributes"),drop =F]
+}
+if (kegg.map != "") {
+ ltmap <- read.delim(kegg.map, header = F, row.names = 1) 
+}
+
+#Aquiring colors 
+grp.col <- design[,ncol(design)-1]
+grp.pch <- design[,ncol(design)]
+colSums(counts)
+sort(colSums(counts))
+colnames(counts)
+design$batch <- NULL
+if (length(colnames(design)) > 4) {
+  dds <- DESeqDataSetFromMatrix(countData = floor(counts), colData = design, design = ~ donor + condition )
+} else {
+  dds <- DESeqDataSetFromMatrix(countData = counts, colData = design, design = ~ condition )
+}
+dds <- estimateSizeFactors(dds)
+dds <- estimateDispersions(dds)
+counts.vsd <- as.data.frame(getVarianceStabilizedData(dds))
+write.table(data.frame("ID"=rownames(counts.vsd),counts.vsd), file = paste0(output_dir,"/","EF3030_VST_counts.txt"), append = F, row.names = F,sep = "\t", quote = F)
+
+#PCA
+
+pca <- prcomp(t(counts.vsd))
+df_out <- as.data.frame(pca$x)
+percentage <- round(pca$sdev^2 / sum(pca$sde^2) * 100, 2)
+percentage <- paste( colnames(df_out), "(", paste(as.character(percentage), "% )", sep="") )
+
+fviz_eig(pca)
+
+if("donor" %in% colnames(design)) {
+  pca.groups <- factor(design$condition, levels = unique(sort(as.vector(design$condition))))
+  pca.col <- unique(design[,c("condition","color")])
+  pca.col <- pca.col[match(levels(pca.groups), pca.col$condition),][,2] 
+  pca.shape <- factor(design$donor, levels = unique(sort(as.vector(design$donor))))
+  pca.pch <- unique(design[,c("donor","pch")])
+  pca.pch <- pca.pch[match(levels(pca.shape), pca.pch$donor),][,2] 
+  shp.text <- "Donors"
+} else {
+  pca.groups <- factor(design$condition, levels = unique(sort(as.vector(design$condition))))
+  pca.col <- unique(design[,c("condition","color")])
+  pca.col <- pca.col[match(levels(pca.groups), pca.col$condition),][,2] 
+  pca.shape <- factor(design$condition, levels = unique(sort(as.vector(design$condition))))
+  pca.pch <- unique(design[,c("condition","pch")])
+  pca.pch <- pca.pch[match(levels(pca.shape), pca.pch$condition),][,2] 
+  shp.text <- "Samples"
+}
+
+pca.plot <- c()
+pca.plot <- ggplot(df_out, aes(x = PC1, y = PC2, label = rownames(df_out), group = pca.groups)) + geom_point(aes(fill =pca.groups ,color = pca.groups
+                   ,shape=pca.shape,label = rownames(df_out)),show.legend = TRUE,size=5)+ labs(title = "",                                                                                                                              color = "Samples", shape=shp.text ,fill = "Samples", x=percentage[1] , y=percentage[2])	+ #ggplot2::stat_ellipse(inherit.aes = T, level = .95) +
+                    guides(colour = guide_legend(ncol = 3)) + # geom_text_repel()+
+                    scale_color_manual(values = pca.col)+scale_shape_manual(values = pca.pch)+ scale_fill_manual(values = pca.col) +     
+                    theme_bw()+theme(legend.position = "bottom", legend.direction = "horizontal")+coord_fixed() # + ylim(-100,120) +xlim(-100,120) #
+print(pca.plot)
+
+evs <- pca$sdev^2
+per <- sum(evs)
+
+
+pdf(paste0(output_dir,"/pca_plot.pdf"),paper = "a4r")
+   # height=8,
+   # width=8)
+print(pca.plot)
+dev.off()
+
+
+#Reads Mapped
+
+flur <- read.delim(paste0(input_dir,"/Flu_reads.txt") , header = T)#, row.names = 1)
+flur <- summarySE(flur, measurevar="Reads_Mapped.", groupvars=c("Group"))
+
+bacr <- read.delim(paste0(input_dir,"/Bac_reads.txt") , header = T)#, row.names = 1)
+bacr <- summarySE(bacr, measurevar="Reads_Mapped.", groupvars=c("Group"))
+
+a<-ggplot(bacr, aes(x=Group, y=Reads_Mapped., fill=Group)) + 
+    geom_bar(position=position_dodge(), stat="identity") +
+    geom_errorbar(aes(ymin=Reads_Mapped.-se, ymax=Reads_Mapped.+se),
+                  width=.2,                    # Width of the error bars
+                  position=position_dodge(.9)) +
+  labs(title = "Reads mapped to EF3030",color = "Group",x="Sample",y="Reads Mapped %")+
+  scale_fill_manual(values = c("dodgerblue4","firebrick4"))+theme(axis.text.x=element_blank())
+
+flur$Group <- factor(flur$Group, levels = c("Host+pH1N1","Host+EF3030+pH1N1"))
+b<-ggplot(flur, aes(x=Group, y=Reads_Mapped., fill=Group)) + 
+    geom_bar(position=position_dodge(), stat="identity") +
+    geom_errorbar(aes(ymin=Reads_Mapped.-se, ymax=Reads_Mapped.+se),
+                  width=.2,                    # Width of the error bars
+                  position=position_dodge(.9)) +
+  labs(title = "Reads mapped to pH1N1",color = "Group",x="Sample",y="Reads Mapped %")+
+  scale_fill_manual(values = c("firebrick3","orange3"))+theme(axis.text.x=element_blank())
+
+pdf(paste0(output_dir,"/Reads_mapped_plot.pdf"),paper = "a4r")
+   # height=8,
+   # width=8)
+print(a)
+print(b)
+dev.off()
+
+
+#DE genes Venn & Rarefaction
+
+dds <- DESeq(dds, betaPrior = F)
+
+contrast.list <- data.frame(Contrast=comparisons)
+upset <- c()
+torarefy <- c()
+
+for (i in contrast.list$Contrast) {
+
+  	pair <- as.data.frame(strsplit(as.character(i),'_vs_'))
+	DE.genes <- as.data.frame(results(dds, contrast=c("condition",as.character(pair[1,]),as.character(pair[2,])), independentFiltering = TRUE, alpha=0.05))
+	DE.genes <- na.omit(DE.genes)
+	rownames(DE.genes) <- gsub(".p01","",rownames(DE.genes))
+	rareall <- as.data.frame(c(rep_len(1,length.out = length(row.names(DE.genes)))),row.names = rownames(DE.genes) )
+	torarefy <- merge.all(torarefy,rareall)
+  heading<- paste(as.character(pair[1,])," vs ",as.character(pair[2,])," (Abs(LFC) > 1"," and FDR < 0.05",")", sep="")
+	DE.genes$Significant = as.factor(DE.genes$padj <= 0.05 & abs(DE.genes$log2FoldChange) >= 1)
+  Significant <- c(DE.genes$Significant)
+ if (gff.file != "") {
+    rownames(anno) <- gsub(".p01","",rownames(anno))
+  DE.genes <- merge.all(anno,DE.genes)
+  DE.genes <- DE.genes[!(is.na(DE.genes$padj)),]
+  }
+  write.table(data.frame("ID"=rownames(DE.genes),DE.genes), file = paste0(output_dir,"/",i,"_unfiltered_degenes.txt"), append = F, row.names = F,sep = "\t", quote = FALSE)
+
+	DE.genes <- DE.genes[DE.genes$padj <= 0.05,]
+	DE.genes <- DE.genes[abs(DE.genes$log2FoldChange) >=1,]
+  
+	write.table(data.frame("ID"=rownames(DE.genes),DE.genes), file = paste0(output_dir,"/",i,"_FDRLFC_degenes.txt"), append = F, row.names = F,sep = "\t", quote = FALSE)
+	genes <- as.data.frame(c(rep_len(1,length.out = length(row.names(DE.genes)))),row.names = rownames(DE.genes) )
+	upset <- merge.all(upset,genes)
+}
+
+colnames(torarefy) <- as.vector(contrast.list$Contrast)
+torarefy[is.na(torarefy)]<-0
+
+colnames(upset) <- as.vector(contrast.list$Contrast)
+upset[is.na(upset)]<-0
+
+upset.plot <- upset(upset, sets = colnames(upset), sets.bar.color = "orange", point.size = 1.5,text.scale = 0.7,
+              order.by = "freq", nintersects = 60)#, empty.intersections = "off")#, nintersects = NA)
+
+pdf(paste0(output_dir,"/Upset_degenes_plot_LFC.pdf"),
+    height=5,
+    width=8)
+print(upset.plot)
+dev.off()
+print(upset.plot)
+
+upset$`Host+EF3030+pH1N1_vs_EF3030` <- upset$`Host+EF3030+pH1N1_vs_EF3030`==1
+upset$`Host+EF3030_vs_EF3030` <- upset$`Host+EF3030_vs_EF3030`==1
+upset$`Host+EF3030+pH1N1_vs_Host+EF3030` <- upset$`Host+EF3030+pH1N1_vs_Host+EF3030`==1
+colnames(upset) <- gsub("_vs_","\nvs\n",colnames(upset))
+
+venn <- ggplot(upset, aes(A = `Host+EF3030+pH1N1\nvs\nEF3030`, B = `Host+EF3030\nvs\nEF3030`, C = `Host+EF3030+pH1N1\nvs\nHost+EF3030`)) +
+  geom_venn(show_percentage = FALSE,set_name_size=5,fill_color = c("red", "green", "blue"), text_size = 6) + theme_void()  + coord_fixed()
+pdf(paste0(output_dir,"/VennEF3030_plot_LFC.pdf"),
+    height=8,
+    width=8)
+print(venn)
+dev.off()
+
+countsX <- counts
+rownames(countsX) <- gsub(pattern = ".p01", "", rownames(counts))
+rarefy.counts <- round(countsX[rownames(torarefy),],0)
+raremax <- round(min(rowSums(t(rarefy.counts))),0)
+srare <- rarefy(t(rarefy.counts),raremax)
+
+rarefy.raw.df <- rarecurve(t(rarefy.counts), step = round(raremax/100,0), sample = raremax)
+
+rarefy.df <- as.data.frame(matrix(nrow = 0,
+                                  ncol = 5))
+rarefy.points.df <- rarefy.df
+for(i in 1:length(rarefy.raw.df)){
+  steps <- as.numeric(gsub("N","",names(rarefy.raw.df[[i]])))
+  detected_genes <- as.numeric(rarefy.raw.df[[i]])
+  rarefy.df <- as.data.frame(rbind(rarefy.df,
+                                   cbind(as.numeric(steps),as.numeric(detected_genes),as.character(design[i,1]),as.character(design[i,2]),design[i,3])))
+  rarefy.points.df <- as.data.frame(rbind(rarefy.points.df,
+                                          cbind(as.numeric(max(steps)),as.numeric(max(detected_genes)),as.character(design[i,1]),as.character(design[i,2],design[i,3]))))
+  
+}
+rarefy.points.df <- rarefy.points.df[,c(1,2,4,3)]
+rarefy.df <- rarefy.df[,c(1,2,3,5,4)]
+shpt <- "Sample"
+fillt <- "Sample"
+rarefy.plot <- ggplot()+
+  geom_line(rarefy.df,mapping=aes(x=as.numeric(as.character(rarefy.df[,1])), y=as.numeric(as.character(rarefy.df[,2])),group=as.factor(rarefy.df[,4]),color=as.factor(rarefy.df[,4])))+
+  geom_point(rarefy.points.df,mapping=aes(x=as.numeric(as.character(rarefy.points.df[,1])), y=as.numeric(as.character(rarefy.points.df[,2])),group=as.factor(rarefy.points.df[,4]),color=pca.groups,shape =pca.shape),size = 3)+
+  scale_color_manual(values = rep(pca.col, each=2))+scale_shape_manual(values = rep(pca.pch, each=2))+
+  labs(x="Reads mapping to protein-coding genes", y="Genes detected", color = "Sample", shape = shpt, fill = fillt) + xlim(0,500000)+
+  theme_bw()
+print(rarefy.plot)
+
+pdf(paste0(output_dir,"/rarefication_plot.pdf"),paper = "a4r")
+    #height=5,
+    #width=8)
+grid.arrange(rarefy.plot)
+dev.off()
+
+```
+
+
+#Figure 3 Panels + Supplemental Figure 2 panels
+
+```{r}
+counts.path <- paste0(input_dir,"/EF3030_counts.matrix") 
+groups.path <- paste0(input_dir,"/EF3030_groups.matrix.txt") 
+kegg.map <- paste0(input_dir,"/Keggltmap")
+gff.file <- paste0(input_dir,"/EF3030.gbk.gff")
+
+comparisons <- c("Host+EF3030+pH1N1_vs_EF3030","Host+EF3030_vs_EF3030","Host+EF3030+pH1N1_vs_Host+EF3030")
+counts <- read.delim(counts.path, header = T, row.names = 1)
+design <- read.delim(groups.path, header = T)
+if (gff.file != "") {
+gff <- read.gff(gff.file, na.strings = c(".", "?"), GFF3 = TRUE)
+anno <- gff[grep(".p01",unique(gff$attributes)),]
+rownames(anno) <- gsub("ID=","",gsub(";.*$","",anno$attributes))
+anno$attributes <- gsub(" ","_",gsub(";.*$","",gsub("^.*;product=","",anno$attributes))) 
+anno <- anno[,c("attributes"),drop =F]
+}
+if (kegg.map != "") {
+ ltmap <- read.delim(kegg.map, header = F, row.names = 1) 
+}
+
+#Aquiring colors 
+grp.col <- design[,ncol(design)-1]
+grp.pch <- design[,ncol(design)]
+colSums(counts)
+sort(colSums(counts))
+colnames(counts)
+design$batch <- NULL
+if (length(colnames(design)) > 4) {
+  dds <- DESeqDataSetFromMatrix(countData = floor(counts), colData = design, design = ~ donor + condition )
+} else {
+  dds <- DESeqDataSetFromMatrix(countData = counts, colData = design, design = ~ condition )
+}
+dds <- estimateSizeFactors(dds)
+dds <- estimateDispersions(dds)
+counts.vsd <- as.data.frame(getVarianceStabilizedData(dds))
+
+dds <- DESeq(dds, betaPrior = F)
+contrast.list <- data.frame(Contrast=comparisons)
+upset <- c()
+upsetlfc <- c()
+torarefy <- c()
+for (i in contrast.list$Contrast) {
+	pair <- as.data.frame(strsplit(as.character(i),'_vs_'))
+	DE.genes <- as.data.frame(results(dds, contrast=c("condition",as.character(pair[1,]),as.character(pair[2,])), independentFiltering = TRUE, alpha=0.05))
+	DE.genes <- na.omit(DE.genes)
+	rareall <- as.data.frame(c(rep_len(1,length.out = length(row.names(DE.genes)))),row.names = rownames(DE.genes) )
+	torarefy <- merge.all(torarefy,rareall)
+  heading<- paste(as.character(pair[1,])," vs ",as.character(pair[2,])," (Abs(LFC) > 1"," and FDR < 0.05",")", sep="")
+	DE.genes$Significant = as.factor(DE.genes$padj <= 0.05 & abs(DE.genes$log2FoldChange) >= 1)
+  Significant <- c(DE.genes$Significant)
+	DE.genes <- DE.genes[DE.genes$padj <= 0.05,]
+  DE.genes <- DE.genes[abs(DE.genes$log2FoldChange) >=1,]
+	genes <- as.data.frame(c(rep_len(1,length.out = length(row.names(DE.genes)))),row.names = rownames(DE.genes) )
+	upset <- merge.all(upset,genes)
+	upsetlfc <- merge.all(upsetlfc,DE.genes[,2,drop=F])
+}
+colnames(torarefy) <- as.vector(contrast.list$Contrast)
+torarefy[is.na(torarefy)]<-0
+colnames(upset) <- as.vector(contrast.list$Contrast)
+upset[is.na(upset)]<-0
+write.table(upset, file = paste0(output_dir,"/","Upset_FDR_GeneMatrix.txt"), append = F, row.names = T,sep = "\t")
+
+colnames(upsetlfc) <- as.vector(contrast.list$Contrast)
+upsetlfc[is.na(upsetlfc)]<-0
+write.table(upsetlfc, file = paste0(output_dir,"/","Upset_LFC_GeneMatrix.txt"), append = F, row.names = T,sep = "\t")
+
+upset.plot <- upset(upset, queries = list(list(query = intersects, params = list("Host+EF3030_vs_EF3030","Host+EF3030+pH1N1_vs_EF3030"), color = "red", active = T), list(query = intersects, params = list("Host+EF3030_vs_EF3030","Host+EF3030+pH1N1_vs_EF3030","Host+EF3030+pH1N1_vs_Host+EF3030"), color = "orange", active = T), list(query = intersects, params = list("Host+EF3030+pH1N1_vs_EF3030", "Host+EF3030+pH1N1_vs_Host+EF3030"), color = "blue", active = T)), sets = colnames(upset), sets.bar.color = "orange",main.bar.color = "grey50",matrix.color = "gray50", point.size = 6,text.scale = 6,  order.by = "freq")
+
+intersect_A <- rownames(query_upset(set = upset, queries = c("Host+EF3030_vs_EF3030","Host+EF3030+pH1N1_vs_EF3030")))
+
+intersect_B <- rownames(query_upset(set = upset, queries = c("Host+EF3030_vs_EF3030","Host+EF3030+pH1N1_vs_EF3030","Host+EF3030+pH1N1_vs_Host+EF3030")))
+
+intersect_C <- rownames(query_upset(set = upset, queries = c("Host+EF3030+pH1N1_vs_EF3030", "Host+EF3030+pH1N1_vs_Host+EF3030")))
+
+
+colsep <- get_heatmap_separators(as.character(design$condition))
+hmcol <- colorRampPalette(c("navyblue","white","firebrick3"))(75)
+
+png(filename = paste0(output_dir,"intersect_A.png"),width = 1720, height = 1820, units = "px")
+hm.plotA <- heatmap.2(t(scale(t(counts.vsd[intersect_A,]))),keysize = 1,margins = c(10,20),
+              col=hmcol,
+              key.par=list(mar=c(3.5,0,3,3.4),cex = 2),#lmat=rbind(c(9,5 ,4),c(8,1,7), c(6, 2, 3)), lhei=c(1.5,0.3, 5), lwid=c(1, 10, 1),
+              key.title = "Z-Score",key.xlab = NA, key.ylab = NA,
+              trace="none",
+              labRow=F,#row.names(counts.vsd[intersect_A,]),
+              labCol = F,
+              Rowv = T,
+              Colv = F,
+              ColSideColors=as.vector(grp.col),
+              rowsep = F,
+              #colsep = colsep,
+              dendrogram = "row",
+              cexCol = 3,#srtCol=45,
+              cexRow = 0.8)
+dev.off()
+
+png(filename = paste0(output_dir,"intersect_B.png"),width = 1720, height = 1820, units = "px")
+hm.plotB <- heatmap.2(t(scale(t(counts.vsd[intersect_B,]))),keysize = 1,margins = c(10,20),
+              col=hmcol,
+              key.par=list(mar=c(3.5,0,3,3.4),cex = 2),#lmat=rbind(c(9,5 ,4),c(8,1,7), c(6, 2, 3)), lhei=c(1.5,0.3, 5), lwid=c(1, 10, 1),
+              key.title = "Z-Score",key.xlab = NA, key.ylab = NA,
+              trace="none",
+              labRow=F,#row.names(counts.vsd[intersect_B,]),
+              labCol = F,
+              Rowv = T,
+              Colv = F,
+              ColSideColors=as.vector(grp.col),
+              rowsep = F,
+              #colsep = colsep,
+              dendrogram = "row",
+              cexCol = 3,#srtCol=45,
+              cexRow = 0.8)
+dev.off()
+
+png(filename = paste0(output_dir,"intersect_C.png"),width = 1720, height = 1820, units = "px")
+hm.plotC <- heatmap.2(t(scale(t(counts.vsd[intersect_C,]))),keysize = 1,margins = c(10,20),
+              col=hmcol,
+              key.par=list(mar=c(3.5,0,3,3.4),cex = 2),#lmat=rbind(c(9,5 ,4),c(8,1,7), c(6, 2, 3)), lhei=c(1.5,0.3, 5), lwid=c(1, 10, 1),
+              key.title = "Z-Score",key.xlab = NA, key.ylab = NA,
+              trace="none",
+              labRow=F,#row.names(counts.vsd[intersect_C,]),
+              labCol = F,
+              Rowv = T,
+              Colv = F,
+              ColSideColors=as.vector(grp.col),
+              rowsep = F,
+              #colsep = colsep,
+              dendrogram = "row",
+              cexCol =  3,#srtCol=45,
+              cexRow = 0.8)
+dev.off()
+
+#WGCNA and Main Fig panels
+
+wgcna <- as.data.frame(t(counts.vsd[rownames(torarefy),]))
+wgcna <- as.data.frame(t(wgcna))
+wgcna <- transform(wgcna, SD=apply(wgcna,1, sd, na.rm = TRUE))
+wgcna <- wgcna[which(wgcna$SD != 0),]
+wgcna$SD <-NULL
+wgcna <- as.data.frame(t(wgcna))
+
+powers <- c(c(1:10), seq(from = 12, to=20, by=2))
+sft <- pickSoftThreshold(wgcna, powerVector = powers, verbose = 5)
+softpower <- find_soft_power(sft)
+
+#WGCNA Create modules
+invisible(utils::memory.limit(8000))
+adjacency <- adjacency(wgcna, power = softpower)
+
+TOM <- TOMsimilarity(adjacency)
+dissTOM <- 1-TOM
+geneTree <- hclust(as.dist(dissTOM), method = "average");
+
+
+minModuleSize <- 1
+dynamicMods <- cutreeDynamic(dendro = geneTree, distM = dissTOM,
+                             deepSplit = 2, pamRespectsDendro = FALSE, cutHeight = 1,
+                             minClusterSize = minModuleSize)
+
+dynamicColors = labels2colors(dynamicMods)
+MEList = moduleEigengenes(wgcna, colors = dynamicColors) #, excludeGrey = TRUE)
+MEs = MEList$eigengenes
+
+MEDiss = 1-cor(MEs, use = "pairwise.complete.obs")
+MEDiss[is.na(MEDiss)] <- 0
+METree = hclust(as.dist(MEDiss), method = "average")
+
+MEDissThres <- 0.25
+
+ADJ1=abs(cor(wgcna,use="p"))^softpower
+Alldegrees1=intramodularConnectivity(ADJ1, dynamicColors)
+
+
+plot(METree, main = "clustering of module eigengenes",
+     xlab = "", sub = "")#, labels = FALSE)
+abline(h=MEDissThres, col = "red")
+
+merge = mergeCloseModules(wgcna, dynamicColors, impute = TRUE, cutHeight = MEDissThres, getNewUnassdME = T, verbose = 3)
+
+mergedColors = merge$colors
+mergedMEs = merge$newMEs
+
+plotDendroAndColors(geneTree, cbind(dynamicColors, mergedColors), c("dynamic tree cut", "merged dynamic"),
+                    dendroLabels = FALSE, hang = 0.03, addGuide = TRUE, guideHang = 0.05)
+
+## wgcna - write modules
+
+tpm.de <- as.data.frame(t(wgcna))
+
+tpm.de.wgcna <- eigengene_invert_id(tpm.de, mergedColors, mergedMEs)
+tpm.de.wgcna <- wgcna_heatmap_reorder(tpm.de.wgcna)
+tpm.de.wgcna <- tpm.de.wgcna[tpm.de.wgcna$module%in%c("black","darkgreen","blue","palevioletred1"),]
+
+write.table(tpm.de.wgcna,
+            paste0(output_dir,"/tpm_de_modules.tsv"),
+            row.names = T,
+            col.names = T,
+            quote = F,
+            sep = "\t")
+
+
+wgcna.module.genes <- as.data.frame(tpm.de.wgcna$module)
+rownames(wgcna.module.genes) = row.names(tpm.de.wgcna)
+split.tpm.de.wgcna <- split(wgcna.module.genes, f = tpm.de.wgcna$module)
+
+for(i in 1:length(split.tpm.de.wgcna)) {
+  if (dim(split.tpm.de.wgcna[[i]])[1] >=20) {
+    write.table(split.tpm.de.wgcna[i], file = paste0(output_dir,"/WGCNA_",names(split.tpm.de.wgcna[i]),"_genes.txt"), append = F, row.names = T,sep = "\t")
+  }
+  
+    pca <- prcomp(t(counts.vsd[rownames(as.data.frame(split.tpm.de.wgcna[i])),]))
+    df_out <- as.data.frame(pca$x)
+    percentage <- round(pca$sdev^2 / sum(pca$sde^2) * 100, 2)
+    percentage <- paste( colnames(df_out), "(", paste(as.character(percentage), "% )", sep="") )
+    
+    fviz_eig(pca)
+    
+    if("donor" %in% colnames(design)) {
+      pca.groups <- factor(design$condition, levels = unique(sort(as.vector(design$condition))))
+      pca.col <- unique(design[,c("condition","color")])
+      pca.col <- pca.col[match(levels(pca.groups), pca.col$condition),][,2] 
+      pca.shape <- factor(design$donor, levels = unique(sort(as.vector(design$donor))))
+      pca.pch <- unique(design[,c("donor","pch")])
+      pca.pch <- pca.pch[match(levels(pca.shape), pca.pch$donor),][,2] 
+      shp.text <- "Donors"
+    } else {
+      pca.groups <- factor(design$condition, levels = unique(sort(as.vector(design$condition))))
+      pca.col <- unique(design[,c("condition","color")])
+      pca.col <- pca.col[match(levels(pca.groups), pca.col$condition),][,2] 
+      pca.shape <- factor(design$condition, levels = unique(sort(as.vector(design$condition))))
+      pca.pch <- unique(design[,c("condition","pch")])
+      pca.pch <- pca.pch[match(levels(pca.shape), pca.pch$condition),][,2] 
+      shp.text <- "Samples"
+    }
+    
+    pca.plot <- c()
+    pca.plot <- ggplot(df_out, aes(x = PC1, y = PC2, label = rownames(df_out), group = pca.groups)) + geom_point(aes(fill =pca.groups ,color = pca.groups
+                       ,shape=pca.shape,label = rownames(df_out)),show.legend = TRUE,size=5)+ labs(title = "",                                                                                                                              color = "Samples", shape=shp.text ,fill = "Samples", x=percentage[1] , y=percentage[2])	+ #ggplot2::stat_ellipse(inherit.aes = T, level = .95) +
+                        guides(colour = guide_legend(ncol = 3)) + # geom_text_repel()+
+                        scale_color_manual(values = pca.col)+scale_shape_manual(values = pca.pch)+ scale_fill_manual(values = pca.col) +     
+                        theme_bw()+theme(legend.position = "bottom", legend.direction = "horizontal") # + coord_fixed() #+ ylim(-15,15) +xlim(-15,15) #
+    print(pca.plot)
+    
+    evs <- pca$sdev^2
+    per <- sum(evs)
+    
+    
+    pdf(paste0(output_dir,"/pca",names(split.tpm.de.wgcna[i]),"_plot.pdf"),height = 5, width = 5 )#,paper = "a4r")
+    print(pca.plot)
+    dev.off()
+}
+
+#printing HM
+
+  tpm.data <- split(tpm.de.wgcna, tpm.de.wgcna$module)
+  IM_con.tpm.df <- c()
+    for(x in 1:length(tpm.data)) {
+            genes <- rownames(tpm.data[[x]])
+            mod_genes <- Alldegrees1[genes, ,drop=F]
+            mod_genes <- mod_genes[order(-mod_genes$kWithin), ,drop = F]
+            df <- tpm.data[[x]]
+            df <- df[rownames(mod_genes), ,drop = F]
+            IM_con.tpm.df <-rbind(IM_con.tpm.df,df)
+    }
+  
+  order_by_modSize <- split(IM_con.tpm.df, IM_con.tpm.df$module)
+
+  sets <- as.data.frame(lapply(order_by_modSize,dim))
+  sets <- sets[,order(sets[1,], decreasing = TRUE)]
+  names(sets)
+  bnm <- c()
+    for(i in names(sets)) {
+      bnm <- rbind(bnm,order_by_modSize[[i]])
+    }
+    
+log2tpm.de <- tpm.de.wgcna[,1:(ncol(tpm.de.wgcna) - 2)]
+zscore.log2tpm.de <- as.data.frame(t(scale(t(log2tpm.de))))
+
+hmcol <- colorRampPalette(c("navyblue","white","firebrick3"))(12)
+rowcol <- bnm$module
+colcol <- as.character(design$color)
+rowsep <- get_heatmap_separators(rowcol)
+colsep <- get_heatmap_separators(colcol)
+
+pdf(paste0(output_dir,"/wgcna_zscorelog2tpm_heatmap_module_plot.pdf"),
+    width = 5, height = 30)
+heatmap.2.fix(as.matrix(zscore.log2tpm.de),
+              col=hmcol,
+              trace="none",
+              labRow=F,#rownames(zscore.log2tpm.de),
+              Rowv = F,
+              Colv = F,
+              RowSideColors=rowcol,
+              #lhei = c(0.5,9.5),
+              breaks = seq(-3,3,by=.5),
+              rowsep = rowsep,
+              #colsep = colsep,
+              cexCol = 0.2,
+              cexRow = 0.1,
+              dendrogram = "none")
+dev.off()
+
+#glnr
+regprecise <- rev(c("EF3030_RS02375","EF3030_RS02380","EF3030_RS02860","EF3030_RS02865","EF3030_RS02870","EF3030_RS02875","EF3030_RS05250","EF3030_RS05245","EF3030_RS05240","EF3030_RS06285","EF3030_RS10605","EF3030_RS10610","EF3030_RS10615"))
+hmcol <- colorRampPalette(c("navyblue","white","firebrick3"))(100)
+bhm <- as.data.frame(counts.vsd[regprecise,])
+rownames(bhm) <- rev(c("RS02375:SP_0501 glnR", "RS02380:SP_0502 glnA", "RS02860:SP_0607 gluP", "RS02865:SP_0608 gluM", "RS02870:SP_0609 gluH", "RS02875:SP_0610 gluQ", "RS05250:SP_1241 glnP", "RS05245:SP_1242 glnQ", "RS05240:SP_1243 zwf", "RS06285:SP_1306 gdhA", "RS10605:SP_2148 arcA", "RS10610:SP_2150 arcB", "RS10615:SP_2151 arcC"))
+bhm <- na.omit(t(scale(t(bhm))))
+bhm <- melt(bhm)
+colnames(bhm) = c("y","x","z")
+
+bipa <- ggplot(bhm) + 
+  geom_tile(aes(x,y,fill=z))+
+  scale_fill_gradientn(colours=hmcol)+
+  theme(axis.text.x=element_text(angle=-90,vjust=.2, hjust=0, size = 4), axis.text.y =element_text(size = 4), title = element_text(size = 3),legend.text = element_text(size = 3), plot.title = element_text(hjust = 0.5), legend.position = "top", legend.direction = "horizontal")+
+  labs(title="Heatmap", x="",y="", z="Z-Score")+
+  coord_fixed(expand = TRUE)
+
+pdf(paste0(output_dir,"/GlnrHM.pdf"),paper = "a4")
+print(bipa)
+dev.off()
+
+
+```
+
+
+#Figure 4 Host PCA + DE Venn + GO Nets
+
+```{r}
+counts.path <- paste0(input_dir,"/Human_counts.matrix")
+groups.path <- paste0(input_dir,"/Human_groups.txt")
+comparisons <- c("Host+EF3030+pH1N1_vs_Host","Host+pH1N1_vs_Host","Host+EF3030+pH1N1_vs_Host+EF3030","Host+EF3030_vs_Host","Host+EF3030+pH1N1_vs_Host+pH1N1")
+counts <- read.delim(counts.path, header = T, row.names = 1)
+design <- read.delim(groups.path, header = T)
+
+#Aquiring colors 
+grp.col <- design[,ncol(design)-1]
+grp.pch <- design[,ncol(design)]
+colSums(counts)
+sort(colSums(counts))
+colnames(counts)
+design$batch <- NULL
+if (length(colnames(design)) > 4) {
+  dds <- DESeqDataSetFromMatrix(countData = floor(counts), colData = design, design = ~ donor + condition )
+} else {
+  dds <- DESeqDataSetFromMatrix(countData = counts, colData = design, design = ~ condition )
+}
+dds <- estimateSizeFactors(dds)
+dds <- estimateDispersions(dds)
+counts.vsd <- as.data.frame(getVarianceStabilizedData(dds))
+write.table(data.frame("ID"=rownames(counts.vsd),counts.vsd), file = paste0(output_dir,"/","Host_VST_counts.txt"), append = F, row.names = F,sep = "\t", quote = F)
+
+#PCA
+
+pca <- prcomp(t(counts.vsd))
+df_out <- as.data.frame(pca$x)
+percentage <- round(pca$sdev^2 / sum(pca$sde^2) * 100, 2)
+percentage <- paste( colnames(df_out), "(", paste(as.character(percentage), "% )", sep="") )
+
+fviz_eig(pca)
+
+if("donor" %in% colnames(design)) {
+  pca.groups <- factor(design$condition, levels = unique(sort(as.vector(design$condition))))
+  pca.col <- unique(design[,c("condition","color")])
+  pca.col <- pca.col[match(levels(pca.groups), pca.col$condition),][,2] 
+  pca.shape <- factor(design$donor, levels = unique(sort(as.vector(design$donor))))
+  pca.pch <- unique(design[,c("donor","pch")])
+  pca.pch <- pca.pch[match(levels(pca.shape), pca.pch$donor),][,2] 
+  shp.text <- "Donors"
+} else {
+  pca.groups <- factor(design$condition, levels = unique(sort(as.vector(design$condition))))
+  pca.col <- unique(design[,c("condition","color")])
+  pca.col <- pca.col[match(levels(pca.groups), pca.col$condition),][,2] 
+  pca.shape <- factor(design$condition, levels = unique(sort(as.vector(design$condition))))
+  pca.pch <- unique(design[,c("condition","pch")])
+  pca.pch <- pca.pch[match(levels(pca.shape), pca.pch$condition),][,2] 
+  shp.text <- "Samples"
+}
+
+pca.plot <- c()
+pca.plot <- ggplot(df_out, aes(x = PC1, y = PC2, label = rownames(df_out), group = pca.groups)) + geom_point(aes(fill =pca.groups ,color = pca.groups
+                   ,shape=pca.shape,label = rownames(df_out)),show.legend = TRUE,size=5)+ labs(title = "",                                                                                                                              color = "Samples", shape=shp.text ,fill = "Samples", x=percentage[1] , y=percentage[2])	+ #ggplot2::stat_ellipse(inherit.aes = T, level = .95) +
+                    guides(colour = guide_legend(ncol = 3)) + # geom_text_repel()+
+                    scale_color_manual(values = pca.col)+scale_shape_manual(values = pca.pch)+ scale_fill_manual(values = pca.col) +     
+                    theme_bw()+theme(legend.position = "bottom", legend.direction = "horizontal")+coord_fixed() # + ylim(-100,120) +xlim(-100,120) #
+print(pca.plot)
+
+evs <- pca$sdev^2
+per <- sum(evs)
+
+
+pdf(paste0(output_dir,"/Host_pca_plot.pdf"),#paper = "a4r")
+    height=8,
+    width=8)
+print(pca.plot)
+dev.off()
+
+
+dds <- DESeq(dds, betaPrior = F)
+contrast.list <- data.frame(Contrast=comparisons)
+
+upset <- c()
+upsetlfc <- c()
+for (i in contrast.list$Contrast) {
+  	pair <- as.data.frame(strsplit(as.character(i),'_vs_'))
+	DE.genes <- as.data.frame(results(dds, contrast=c("condition",as.character(pair[1,]),as.character(pair[2,])), independentFiltering = TRUE, alpha=0.05))
+	DE.genes <- na.omit(DE.genes)
+	rownames(DE.genes) <- gsub(".p01","",rownames(DE.genes))
+  heading<- paste(as.character(pair[1,])," vs ",as.character(pair[2,])," (Abs(LFC) > 1"," and FDR < 0.05",")", sep="")
+	DE.genes$Significant = as.factor(DE.genes$padj <= 0.05 & abs(DE.genes$log2FoldChange) >= 1)
+  Significant <- c(DE.genes$Significant)
+
+  write.table(data.frame("ID"=rownames(DE.genes),DE.genes), file = paste0(output_dir,"/",i,"_Host_unfiltered_degenes.txt"), append = F, row.names = F,sep = "\t", quote = FALSE)
+
+	DE.genes <- DE.genes[DE.genes$padj <= 0.05,]
+	DE.genes <- DE.genes[abs(DE.genes$log2FoldChange) >=1,]
+  
+	write.table(data.frame("ID"=rownames(DE.genes),DE.genes), file = paste0(output_dir,"/",i,"_Host_FDRLFC_degenes.txt"), append = F, row.names = F,sep = "\t", quote = FALSE)
+	genes <- as.data.frame(c(rep_len(1,length.out = length(row.names(DE.genes)))),row.names = rownames(DE.genes) )
+	upset <- merge.all(upset,genes)
+}
+colnames(upset) <- as.vector(contrast.list$Contrast)
+upset[is.na(upset)]<-0
+write.table(upset, file = paste0(output_dir,"/","Host_Upset_FDR_GeneMatrix.txt"), append = F, row.names = T,sep = "\t")
+
+
+write.table(upset, file = paste0(output_dir,"/","Host_Upset_FDR_GeneMatrix.txt"), append = F, row.names = T,sep = "\t")
+
+upset.plot.host <- upset(upset, queries = list(list(query = intersects, params = list("Host+EF3030+pH1N1_vs_Host+EF3030"), color = "red", active = T), list(query = intersects, params = list("Host+pH1N1_vs_Host"), color = "orange", active = T), list(query = intersects, params = list("Host+EF3030+pH1N1_vs_Host"), color = "blue", active = T)), sets = colnames(upset), sets.bar.color = "gold",main.bar.color = "grey50",matrix.color = "gray50", point.size = 4,text.scale = 4,  order.by = "freq",nintersects = 20) 
+
+pdf(paste0(output_dir,"/Host_Upset_degenes_plot_LFC.pdf"),
+    height=5,
+    width=8)
+print(upset.plot.host)
+dev.off()
+
+upset$`Host+EF3030+pH1N1_vs_Host` <- upset$`Host+EF3030+pH1N1_vs_Host`==1
+upset$`Host+pH1N1_vs_Host` <- upset$`Host+pH1N1_vs_Host`==1
+upset$`Host+EF3030+pH1N1_vs_Host+EF3030` <- upset$`Host+EF3030+pH1N1_vs_Host+EF3030`==1
+upset$`Host+EF3030_vs_Host` <- upset$`Host+EF3030_vs_Host`==1
+upset$`Host+EF3030+pH1N1_vs_Host+pH1N1` <- upset$`Host+EF3030+pH1N1_vs_Host+pH1N1`==1
+
+colnames(upset) <- gsub("_vs_","\nvs\n",colnames(upset))
+
+venn <- ggplot(upset, aes(A = `Host+EF3030+pH1N1\nvs\nHost`, B = `Host+pH1N1\nvs\nHost`, C = `Host+EF3030+pH1N1\nvs\nHost+EF3030`)) +
+  geom_venn(show_percentage = FALSE,set_name_size=5,fill_color = c("red", "green", "blue"), text_size = 6) + theme_void()  + coord_fixed()
+pdf(paste0(output_dir,"/VennHost_plot_LFC.pdf"),
+    height=8,
+    width=8)
+print(venn)
+dev.off()
+
+kegg.species = "hsa"
+  mart = useMart("ensembl", dataset="hsapiens_gene_ensembl", host="https://uswest.ensembl.org")
+  org.db <- "org.Hs.eg.db"
+
+files <- Sys.glob(file.path(output_dir, "*_Host_FDRLFC_degenes.txt"))
+
+  for (file in files) {
+    DE <- read.delim(file, header = T, row.names = 1)
+    if (nrow(DE) >10 ) {
+    G_list <- getBM(filters= "ensembl_gene_id", attributes= c("ensembl_gene_id","entrezgene_id"),values=rownames(DE),mart=mart)$entrezgene_id
+        G_list_lfc <- getBM(filters= "ensembl_gene_id", attributes= c("ensembl_gene_id","entrezgene_id"),values=rownames(DE),mart=mart)
+    Ego <- enrichGO(na.omit(G_list), org.db, ont="BP", pvalueCutoff=0.05, pAdjustMethod = "BH", minGSSize = 10, maxGSSize = 500, qvalueCutoff = 0.05)
+    out <- basename(file)
+    out <- gsub("_Host_FDRLFC_degenes.txt","",out)
+    write.table(Ego, file = paste0(output_dir,"/",out,"_Host_FDRLFC_GO.txt"), append = F, row.names = F,sep = "\t")
+    Ego <- simplify(Ego, cutoff=0.7, by="p.adjust", select_fun=min)
+    
+          G_list_lfc <- na.omit(G_list_lfc)
+          G_list_lfc <- G_list_lfc[!duplicated(G_list_lfc$ensembl_gene_id),]
+          rownames(G_list_lfc) <- G_list_lfc$ensembl_gene_id
+          G_list_lfc <- na.omit(merge.all(DE, G_list_lfc))
+          G_list_lfc <- G_list_lfc[!duplicated(G_list_lfc$entrezgene_id),]
+          rownames(G_list_lfc) <- G_list_lfc$entrezgene_id
+          glistval <-G_list_lfc$log2FoldChange
+          names(glistval)<-rownames(G_list_lfc)
+              pdf(paste0(output_dir,"/Emap_CNET_",out,"_GOplot.pdf"),height = 10, width = 10)#paper = "a4r")
+              #print(emapplot(enrichplot::pairwise_termsim(Ego), color="p.adjust",showCategory = 20,layout = "nicely"))
+              print(cnetplot(Ego, categorySize="padj", foldChange=glistval,node_label ="category",showCategory = 10))
+              dev.off()
+
+    }
+  }
+  
+```
+
+#Figure 6 and Supp fig of regprecise db
+```{r}
+
+regdb <- readLines(paste0(input_dir,"/Regprecise_EF3030.db"))
+isHdr <- grepl("#", regdb)
+grp <- regdb[isHdr][cumsum(isHdr)]
+Read <- function(x) read.table(text = x, sep = "\t", fill = TRUE, comment = "#")
+regs <- Map(Read, split(regdb, grp))
+
+counts.vsd <-read.delim(paste0(output_dir,"/EF3030_VST_counts.txt"), header = T, row.names = 1)
+wgcna_list <-read.delim(paste0(output_dir,"/tpm_de_modules.tsv"), header = T, row.names = 1)
+de_list <-read.delim(paste0(output_dir,"/Upset_FDR_GeneMatrix.txt"), header = T, row.names = 1)
+wgcnaNde <- unique(c(rownames(de_list),rownames(wgcna_list)))
+
+for (i in c(1:length(regs))){   #Gives 23 HMs enriched from DE union
+  if(length(intersect(regs[[i]]$V2,rownames(de_list))) > 2 ) {
+    colsep <- get_heatmap_separators(as.character(c("EF3030","EF3030","Host_EF3030","Host_EF3030","Host_EF3030","Host_EF3030_pH1N1","Host_EF3030_pH1N1","Host_EF3030_pH1N1")))
+    hmcol <- colorRampPalette(c("dodgerblue3","white","firebrick3"))(75)
+    pdf(paste0(output_dir,"/sortedFig6/Heatmap_",names(regs[i]),".pdf"),width=8, height=25)#,paper = "a4")
+    
+    aka2 = data.frame(Condition = factor(c("EF3030","EF3030","Host_EF3030","Host_EF3030","Host_EF3030","Host_EF3030_pH1N1","Host_EF3030_pH1N1","Host_EF3030_pH1N1")))
+    rownames(aka2)<-colnames(counts.vsd)
+    aka3 = list(Condition = c(EF3030 = "seagreen4", Host_EF3030="dodgerblue4", Host_EF3030_pH1N1="firebrick4"))
+    aka3[1]
+    
+    rownames(regs[[i]]) <- regs[[i]]$V1
+    regs[[i]] <- regs[[i]][mixedsort(regs[[i]]$V1),]
+
+    rowns <-paste0(gsub("EF3030_", "", regs[[i]]$V2),":",regs[[i]]$V1,"\t",regs[[i]]$V3)
+      rowns <- rowns[!grepl('None', rowns)]
+    
+    pheatmap::pheatmap(na.omit(t(scale(t(counts.vsd[regs[[i]]$V2,])))),color = hmcol,cellwidth = 10,cellheight = 10,cluster_rows = F,labels_row = rowns ,
+      cluster_cols = F,annotation_col = aka2,annotation_colors = aka3[1], main = gsub("-","\n",names(regs[i])), fontsize = 8)#, fontsize_row = 8, fontsize_col = 8)
+    dev.off()
+  }
+}
+
+#Virome DE
+virome <-read.delim(paste0(input_dir,"/EF3030_TIGR4_Virulence.txt"), header = F, row.names = 1)
+virome <- virome[virome$V2 %in% intersect(virome$V2,rownames(de_list)),]
+rowns <- paste0(gsub("EF3030_", "", virome$V2),":",rownames(virome),"\t",virome$V3)
+    pdf(paste0(output_dir,"/sortedFig6/Heatmap_EF3030_TIGR4_Virulence_DE.pdf"),width=8, height=25)
+    pheatmap::pheatmap(na.omit(t(scale(t(counts.vsd[virome$V2,])))),color = hmcol,cellwidth = 10,cellheight = 10,cluster_rows = T,labels_row = rowns ,treeheight_row = 0,
+      cluster_cols = F,annotation_col = aka2,annotation_colors = aka3[1], main = "EF3030_TIGR4_Virulence_DE", fontsize = 8)
+    dev.off()
+
+    
+#Virome all for supplemental
+virome <-read.delim(paste0(input_dir,"/EF3030_TIGR4_Virulence.txt"), header = F, row.names = 1)
+rowns <- paste0(gsub("EF3030_", "", virome$V2),":",rownames(virome),"\t",virome$V3)
+    pdf(paste0(output_dir,"/sortedFig6/Heatmap_EF3030_TIGR4_Virulence_all.pdf"),width=8, height=25)
+    pheatmap::pheatmap(na.omit(t(scale(t(counts.vsd[virome$V2,])))),color = hmcol,cellwidth = 10,cellheight = 10,cluster_rows = T,labels_row = rowns ,treeheight_row = 0,
+      cluster_cols = F,annotation_col = aka2,annotation_colors = aka3[1], main = "EF3030_TIGR4_Virulence_all", fontsize = 8)
+    dev.off()
+    
+
+```
+
+#Supplemental Fig 3 nanostring correlation
+
+```{r}
+source("/Users/admello/OneDrive - University of Maryland School of Medicine/Documents/heatmap.2.fix.R")
+hmcol <- colorRampPalette(c("navyblue","white","firebrick3"))(12)
+nano <- read.delim(paste0(input_dir,"/NS_EF3030_polyAtest_2reps.txt") , header = T, row.names = 1)
+nano$X <- NULL
+rownames(nano) <- nano$EFID
+nano$EFID <- NULL
+
+counts.vsd <-  read.delim(paste0(output_dir,"/","EF3030_VST_counts.txt"), header = T, row.names = 1)
+counts.vsd[rownames(nano),]
+nanos <- as.data.frame(na.omit(t(scale(t(nano)))))
+vsts <- as.data.frame(t(scale(t(counts.vsd[rownames(nanos),c(3,4,5,6,7,8)]))))
+
+pdf(paste0(output_dir,"/NS_vs_VST_all.pdf"),
+    width = 5, height = 20)
+heatmap.2.fix(as.matrix(vsts),
+              col=hmcol,
+              trace="none",
+              labRow=rownames(vsts),
+              Rowv = T,
+              Colv = F,
+              #lhei = c(0.5,9.5),
+              breaks = seq(-3,3,by=.5),
+              #colsep = colsep,
+              cexCol = 0.4,
+              cexRow = 0.4,
+              dendrogram = "none")
+
+heatmap.2.fix(as.matrix(nanos),
+              col=hmcol,
+              trace="none",
+              labRow=rownames(nanos),
+              Rowv = T,
+              Colv = F,
+              #lhei = c(0.5,9.5),
+              breaks = seq(-3,3,by=.5),
+              #colsep = colsep,
+              cexCol = 0.4,
+              cexRow = 0.4,
+              dendrogram = "none")
+dev.off()
+
+de_fdr <- c("EF3030_RS05500","EF3030_RS05485","EF3030_RS06285","EF3030_RS07065","EF3030_RS07890","EF3030_RS07895","EF3030_RS07950","EF3030_RS10610","EF3030_RS10795","EF3030_RS10835","EF3030_RS11105")
+
+pdf(paste0(output_dir,"/NS_vs_VST_DE.pdf"),
+    width = 5, height = 5)
+heatmap.2.fix(as.matrix(na.omit(vsts[de_fdr,])),
+              col=hmcol,
+              trace="none",
+              labRow=rownames(na.omit(vsts[de_fdr,])),
+              Rowv = T,
+              Colv = F,
+              #lhei = c(0.5,9.5),
+              breaks = seq(-3,3,by=.5),
+              #colsep = colsep,
+              cexCol = 0.4,
+              cexRow = 0.4,
+              dendrogram = "none")
+
+heatmap.2.fix(as.matrix(na.omit(nanos[de_fdr,])),
+              col=hmcol,
+              trace="none",
+              labRow=rownames(na.omit(nanos[de_fdr,])),
+              Rowv = T,
+              Colv = F,
+              #lhei = c(0.5,9.5),
+              breaks = seq(-3,3,by=.5),
+              #colsep = colsep,
+              cexCol = 0.4,
+              cexRow = 0.4,
+              dendrogram = "none")
+dev.off()
+
+#below are z scores
+cor(as.numeric(vsts$HB1),as.numeric(nanos$HB1_NS))
+cor(as.numeric(vsts$HB3),as.numeric(nanos$HB3_NS))
+cor(as.numeric(vsts$HB4),as.numeric(nanos$HB4_NS))
+cor(as.numeric(vsts$HIB1),as.numeric(nanos$HIB1_NS))
+cor(as.numeric(vsts$HIB3),as.numeric(nanos$HIB3_NS))
+cor(as.numeric(vsts$HIB4),as.numeric(nanos$HIB4_NS))
+
+library(ggpubr)
+
+df <- cbind(counts.vsd[rownames(nanos),],log2(nano[rownames(nanos),]))
+
+pdf(paste0(output_dir,"/NSlog2_vs_VST_all_spearman.pdf"),
+    width = 5, height = 5)
+
+ggplot(df,aes(x = HB1, y = HB1_NS)) + 
+  geom_point() + stat_cor(method = "spearman") +
+  geom_smooth(method = "lm", se=FALSE) + theme_bw()
+
+ggplot(df,aes(x = HB3, y = HB3_NS)) + 
+  geom_point() + stat_cor(method = "spearman") +
+  geom_smooth(method = "lm", se=FALSE) + theme_bw()
+
+ggplot(df,aes(x = HB4, y = HB4_NS)) + 
+  geom_point() + stat_cor(method = "spearman") +
+  geom_smooth(method = "lm", se=FALSE) + theme_bw()
+
+ggplot(df,aes(x = HIB1, y = HIB1_NS)) + 
+  geom_point() + stat_cor(method = "spearman") +
+  geom_smooth(method = "lm", se=FALSE) + theme_bw()
+
+ggplot(df,aes(x = HIB3, y = HIB3_NS)) + 
+  geom_point() + stat_cor(method = "spearman") +
+  geom_smooth(method = "lm", se=FALSE) + theme_bw()
+
+ggplot(df,aes(x = HIB4, y = HIB4_NS)) +  
+  geom_point() + stat_cor(method = "spearman") +
+  geom_smooth(method = "lm", se=FALSE) + theme_bw()
+
+dev.off()
+
+```
+
+
+
+
+
+

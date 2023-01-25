@@ -1,0 +1,13 @@
+Sample	batch	condition	color	pch
+H1	20191114	Host	seagreen3	16
+H3	20200130	Host	seagreen3	16
+H4	20200130	Host	seagreen3	16
+HB1	20191114	Host+EF3030	dodgerblue3	15
+HB3	20200130	Host+EF3030	dodgerblue3	15
+HB4	20200130	Host+EF3030	dodgerblue3	15
+HI1	20191114	Host+pH1N1	orange3	18
+HI3	20200130	Host+pH1N1	orange3	18
+HI4	20200130	Host+pH1N1	orange3	18
+HIB1	20191114	Host+EF3030+pH1N1	firebrick3	17
+HIB3	20200130	Host+EF3030+pH1N1	firebrick3	17
+HIB4	20200130	Host+EF3030+pH1N1	firebrick3	17
